@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION = 'ap-south-1'
-        ECR_REPO = '896725786296.dkr.ecr.ap-south-1.amazonaws.com/jenkins-java-app'
+        ACR_LOGIN_SERVER = 'dockernew.azurecr.io'
+        IMAGE_NAME = 'jenkins-java-app'
         IMAGE_TAG = "${BUILD_NUMBER}"
     }
 
@@ -11,34 +11,46 @@ pipeline {
 
         stage('Clone Repository') {
             steps {
-                git branch: 'main', url: 'https://github.com/Ajayrichard/Jenkinsandjava.git'
+                git branch: 'main',
+                url: 'https://github.com/Ajayrichard/Jenkinsandjava.git'
             }
         }
 
-        stage('Build (Maven)') {
+        stage('Build Application') {
             steps {
                 sh '''
-                echo "Building Java application..."
                 mvn clean package
                 '''
             }
         }
 
-        stage('Login to AWS ECR') {
+        stage('Docker Login to ACR') {
             steps {
-                sh '''
-                echo "Logging into AWS ECR..."
-                aws ecr get-login-password --region $AWS_REGION | \
-                docker login --username AWS --password-stdin $ECR_REPO
-                '''
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'azure-acr-creds',
+                        usernameVariable: 'ACR_USERNAME',
+                        passwordVariable: 'ACR_PASSWORD'
+                    )
+                ]) {
+
+                    sh '''
+                    echo $ACR_PASSWORD | docker login $ACR_LOGIN_SERVER \
+                    --username $ACR_USERNAME \
+                    --password-stdin
+                    '''
+                }
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 sh '''
-                echo "Building Docker image..."
-                docker build -t $ECR_REPO:$IMAGE_TAG .
+                docker build -t $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG .
+
+                docker tag \
+                $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG \
+                $ACR_LOGIN_SERVER/$IMAGE_NAME:latest
                 '''
             }
         }
@@ -46,8 +58,8 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 sh '''
-                echo "Pushing Docker image to ECR..."
-                docker push $ECR_REPO:$IMAGE_TAG
+                docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG
+                docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:latest
                 '''
             }
         }
@@ -57,8 +69,9 @@ pipeline {
         success {
             echo 'Pipeline completed successfully'
         }
+
         failure {
-            echo 'Pipeline failed '
+            echo 'Pipeline failed'
         }
     }
 }
